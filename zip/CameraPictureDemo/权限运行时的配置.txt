@@ -1,0 +1,9 @@
+
+Android运行时权限的总结，以及EasyPermissions框架的使用
+
+https://segmentfault.com/a/1190000012247350
+
+dependencies {
+    compile 'pub.devrel:easypermissions:1.0.1'
+}
+
