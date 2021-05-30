@@ -1,0 +1,222 @@
+https://www.jianshu.com/p/a8ae092bb8b8
+
+https://blog.csdn.net/liang9zi/article/details/79296828
+
+https://blog.csdn.net/j12345678901/article/details/78110640/     解析YUV数据的方法就在这个链接中
+
+一、YUV数据结构：
+
+
+1、YUV_420_888:
+	解决 YUV444 占用空间过大问题，也是最常用的采样格式
+
+	YUV数据的占比：
+	Y:U:V = 4:1:1 = 8:2:2
+
+	YUV数据的length是image.getWidth()*imageHeight()*3/2，即图片的宽高的3/2
+
+	①YUV420Planar（YUV420P）:
+		YU12 = ：------------------
+
+		YV12 = 20：------------------
+			存储格式：
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			V V 
+			V V
+			U U 
+			U U
+
+		I420 = YV21 = 19：-----------
+			存储格式：
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			U U
+			U U
+			V V 
+			V V
+
+------------------------------------------------------------------------------------------------------
+	②YUV420SemiPlanar（YUV420SP）:
+		NV12 = 21：------------------
+			存储格式：
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			U V U V
+			U V U V
+			V U V U
+			V U V U
+
+		NV21 = 39：------------------
+			存储格式：
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			Y Y Y Y
+			V U V U
+			V U V U
+			U V U V
+			U V U V
+		
+		Camera1中返回的默认数据就是就是NV21，
+		我们直接使用YUVImage这个类来处理就可以转换成Bitmap，并且YUVImage只支持ImageFormat.NV21和YUY2格式的
+		YUVImage中的源码：
+		if (format != ImageFormat.NV21 && format != ImageFormat.YUY2) {
+    
+			throw new IllegalArgumentException("only support ImageFormat.NV21 " + 
+						"and ImageFormat.YUY2 for now");
+		
+}
+
+		Camera2中的imageReader.newInstance()不支持NV21、YUY2，支持YUV_420_888、YV12、JPEG
+		ImageReader中的源码：
+		if (format == ImageFormat.NV21) {
+    
+			throw new IllegalArgumentException("NV21 format is not supported");
+		
+}
+		
+
+------------------------------------------------------------------------------------------------------
+	③YUV420PackedPlanar（YUV420PP）
+
+	④YUV420PackedSemiPlanar（YUV420PSP）
+		
+	
+
+2、YUV_422_888:
+	YUYV------------------
+	存储格式：
+	YUYV YUYV YUYV YUYV
+
+	UYVY------------------
+	存储格式：
+	UYVY UYVY UYVY UYVY
+
+	YUV422P------------------
+	存储格式：
+	YYYY YYYY UUUU VVVV
+
+3、YUV_444_888:
+	4:4:4表示完全取样，每个像素点都采样单独的 YUV 分量信息，包含了最全面的 YUV 信息。
+
+
+
+
+二、YUV_420_888数据的分量的存储位置：
+
+	Y、U和V三个分量的数据分别保存在三个Plane类中，可以通过imageReader.acquireLatestImage()方法拿到image，
+	image保存有图片的宽和高，通过getWidth()和getHeight()得到，然后用image.getPlanes()得到Plane[]。
+	Plane实际是对ByteBuffer的封装。
+	Image保证了plane #0一定是Y，#1一定是U，#2一定是V。且对于plane #0，Y分量数据一定是连续存储的，中间不会
+	有U或V数据穿插，也就是说我们一定能够一次性得到所有Y分量的值。
+	接下来看看U和V分量，我们考虑其中的三类格式：Planar，SemiPlanar和PackedSemiPlanar
+
+
+三、YUV_420_888几种不同的存储方式：
+
+	①YUV420Planar（YUV420P）:
+		Planar下U和V分量是分开存放的，所以我们也应当能够一次性从plane #1和plane #2中获得所有的U和V分量值
+		即YYYY-----plana[0]
+		  YYYY
+		  YYYY
+		  YYYY
+		  UU  -----plana[1]
+		  UU
+		  VV  -----plana[2]
+		  VV
+
+		image format: 35
+		get data from 3 planes
+		pixelStride 1	       
+		rowStride 1920	       -------->这里的rowStride一般会大于图像的width，这种情况要考虑“逐行截取”。
+		width 1920
+		height 1080
+		buffer size 2088960    ---------->这里的缓冲buffer一般会大于总像素1920x1080
+		Finished reading data from plane 0
+		pixelStride 1
+		rowStride 960
+		width 1920
+		height 1080
+		buffer size 522240
+		Finished reading data from plane 1
+		pixelStride 1
+		rowStride 960
+		width 1920
+		height 1080
+		buffer size 522240
+		Finished reading data from plane 2
+
+		从Image中获得的图片格式是35，即YUV_420_888，一共有3个planes，图片分辨率为1920x1080，
+		像素点个数为2073600；可以看到Y分量包含有全部的像素点，而U和V都只含有1/4的像素点，
+		显然是YUV420。更为明显的是，Y分量中rowStride为1920，pixelStride代表行内颜色值间隔，
+		取1表示无间隔，即对于一行1920个像素点每个都有独立的值，根据其buffer size可以得出共有1080行；
+		而U分量中，一行1920个像素点只有960个值，即行内每两素点共用一个U值，根据其buffer size					得出共有540行，即行间每两个像素点共用一个U值；这就是YUV420的采样了。
+
+	②YUV420SemiPlanar（YUV420SP）:
+		SemiPlanar，此格式下U和V分量交叉存储，Image并没有为我们将U和V分量分离出来。
+		即YYYY-----plana[0]
+		  YYYY
+		  YYYY
+		  YYYY
+		  UVUV-----plana[1]
+		  UVUV
+		  VUVU-----plana[2]
+		  UVUV
+	
+
+		image format: 35
+		get data from 3 planes
+		pixelStride 1
+		rowStride 1920
+		width 1920
+		height 1080
+		buffer size 2088960
+		Finished reading data from plane 0
+		pixelStride 2
+		rowStride 1920
+		width 1920
+		height 1080
+		buffer size 1044479
+		Finished reading data from plane 1
+		pixelStride 2
+		rowStride 1920
+		width 1920
+		height 1080
+		buffer size 1044479
+		Finished reading data from plane 2
+
+
+		图片格式依然是YUV_420_888，Y分量与上述Planar中一样。但U和V分量出现了变化，
+		buffer size是Y分量的1/2，如果说U分量只包含有U分量信息的话应当是1/4，多出来了1/4的内容，
+		我们稍后再仔细看。注意到U中rowStride为1920，即U中每1920个数据代表一行，但pixelStride为2，
+		代表行内颜色值间隔为1，就说是只有行内索引为0 2 4 6 ...才有U分量数据，
+		这样来说还是行内每两个像素点共用一个U值，行间每两个像素点共用一个U值，即YUV420。
+
+
+
+四、将image获取的三个plana值转换成YUV数据的代码：
+	看Camera2VideoCommunicationDemo工程下的ImageUtils类
+
+
+
+
+
+
+
+
+
+CropRect的问题
+
+
+
+
+Image类在API 19中引入，但真正开始发挥作用还是在API 21引入CameraDevice和MediaCodec的增强后。API 21引入了Camera2，deprecated掉了Camera，
+确立Image作为相机得到的原始帧数据的载体；硬件编解码的MediaCodec类加入了对Image和Image的封装ImageReader的全面支持。
+可以预见，Image将会用来统一Android内部混乱的中间图片数据（这里中间图片数据指如各式YUV格式数据，在处理过程中产生和销毁）管理
